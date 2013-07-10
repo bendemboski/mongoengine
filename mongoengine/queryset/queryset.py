@@ -53,7 +53,7 @@ class QuerySet(object):
         self._initial_query = {}
         self._where_clause = None
         self._loaded_fields = QueryFieldList()
-        self._ordering = []
+        self._ordering = None
         self._snapshot = False
         self._timeout = True
         self._class_check = True
@@ -365,7 +365,7 @@ class QuerySet(object):
                 msg = ("Some documents inserted aren't instances of %s"
                        % str(self._document))
                 raise OperationError(msg)
-            if doc.pk and not doc._created:
+            if doc.pk and doc._created:
                 msg = "Some documents have ObjectIds use doc.update() instead"
                 raise OperationError(msg)
             raw.append(doc.to_mongo())
@@ -594,6 +594,34 @@ class QuerySet(object):
             self._initial_query = {"_cls": self._document._class_name}
 
         return self
+
+    def only_classes(self, *classes):
+        doc = self._document
+        if doc._meta.get('allow_inheritance') is True:
+            queryset = self.clone()
+            class_names = [cls._class_name for cls in classes]
+            allowed_class_names = [name for name in self._document._subclasses if name in class_names]
+            if len(allowed_class_names) == 1:
+                queryset._initial_query = {"_cls": allowed_class_names[0]}
+            else:
+                queryset._initial_query = {"_cls": {"$in": allowed_class_names}}
+            return queryset
+        else:
+            return self
+
+    def exclude_classes(self, *classes):
+        doc = self._document
+        if doc._meta.get('allow_inheritance') is True:
+            queryset = self.clone()
+            class_names = [cls._class_name for cls in classes]
+            allowed_class_names = [name for name in self._document._subclasses if name in class_names]
+            if len(allowed_class_names) == 1:
+                queryset._initial_query = {"_cls": {"$ne": allowed_class_names[0]}}
+            else:
+                queryset._initial_query = {"_cls": {"$nin": allowed_class_names}}
+            return queryset
+        else:
+            return self
 
     def clone(self):
         """Creates a copy of the current
@@ -1217,7 +1245,7 @@ class QuerySet(object):
             if self._ordering:
                 # Apply query ordering
                 self._cursor_obj.sort(self._ordering)
-            elif self._document._meta['ordering']:
+            elif self._ordering == None and self._document._meta['ordering']:
                 # Otherwise, apply the ordering from the document model
                 order = self._get_order_by(self._document._meta['ordering'])
                 self._cursor_obj.sort(order)
